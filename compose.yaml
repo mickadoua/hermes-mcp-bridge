@@ -1,0 +1,22 @@
+# Example deployment: the bridge and the cloudflared connector, side by side.
+# No port is published on the host: the tunnel goes out, nothing comes in.
+services:
+  hermes-mcp-bridge:
+    build: .
+    env_file: .env
+    restart: unless-stopped
+    networks: [hermes]
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?Cloudflare tunnel token}
+    restart: unless-stopped
+    depends_on: [hermes-mcp-bridge]
+    networks: [hermes]
+
+networks:
+  hermes:
+    external: true
+    name: hermes
