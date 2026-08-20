@@ -1,13 +1,12 @@
-"""Validation du JWT injecté par Cloudflare Access.
+"""Validation of the JWT injected by Cloudflare Access.
 
-Pourquoi l'origine valide alors que le bord filtre déjà : parce que le
-conteneur écoute sur un réseau Docker partagé. Sans cette couche, n'importe
-quel conteneur voisin joint le pont directement, sans jamais passer par
-Cloudflare. Le filtrage en amont protège d'Internet, pas des voisins.
+Why the origin validates when the edge already filters: because the container
+listens on a shared Docker network. Without this layer, any neighbouring
+container reaches the bridge directly, never going through Cloudflare. The
+upstream filtering protects you from the Internet, not from the neighbours.
 
-La documentation de l'« OAuth géré » de Cloudflare pose d'ailleurs la
-condition explicitement : ne l'activer que pour un serveur MCP qui valide le
-JWT d'Access.
+Cloudflare's "managed OAuth" documentation states the condition explicitly
+anyway: only enable it for an MCP server that validates the Access JWT.
 """
 
 from __future__ import annotations
@@ -21,22 +20,22 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
 
-#: En-tête posé par Access sur chaque requête qui a passé une politique.
+#: Header set by Access on every request that has passed a policy.
 JWT_HEADER = "cf-access-jwt-assertion"
-#: Cookie équivalent, utilisé par les navigateurs.
+#: Equivalent cookie, used by browsers.
 JWT_COOKIE = "CF_Authorization"
 
 
 class AccessJWTError(Exception):
-    """Le jeton est absent, illisible, ou ne vise pas cette application."""
+    """The token is missing, unreadable, or not meant for this application."""
 
 
 class AccessJWTVerifier:
-    """Vérifie signature, émetteur, audience et expiration.
+    """Checks signature, issuer, audience and expiry.
 
-    L'audience est le point à ne pas rater : c'est elle qui distingue *cette*
-    application des autres applications du même compte Cloudflare. Sans elle,
-    un jeton émis pour une autre app passerait la validation.
+    The audience is the part not to miss: it is what tells *this* application
+    apart from the other applications on the same Cloudflare account. Without
+    it, a token issued for another app would pass validation.
     """
 
     def __init__(self, issuer: str, audience: str, jwks_url: str) -> None:
@@ -46,7 +45,7 @@ class AccessJWTVerifier:
 
     def verify(self, token: str) -> dict:
         if not token:
-            raise AccessJWTError("jeton absent")
+            raise AccessJWTError("missing token")
         try:
             signing_key = self._jwks.get_signing_key_from_jwt(token).key
             return jwt.decode(
@@ -59,16 +58,16 @@ class AccessJWTVerifier:
             )
         except AccessJWTError:
             raise
-        except Exception as exc:  # pragma: no cover - dépend de PyJWT
+        except Exception as exc:  # pragma: no cover - depends on PyJWT
             raise AccessJWTError(str(exc)) from exc
 
 
 class AccessJWTMiddleware:
-    """Middleware ASGI : 401 tant que le jeton n'est pas valide.
+    """ASGI middleware: 401 until the token is valid.
 
-    Placé devant l'application MCP, il s'applique donc aussi aux routes de
-    découverte. `exempt_paths` sert aux sondes de santé, qui ne doivent rien
-    révéler d'autre qu'un « je suis vivant ».
+    Sitting in front of the MCP application, it therefore also covers the
+    discovery routes. `exempt_paths` is there for health probes, which must
+    reveal nothing beyond "I am alive".
     """
 
     def __init__(
@@ -90,16 +89,16 @@ class AccessJWTMiddleware:
         try:
             claims = self.verifier.verify(token)
         except AccessJWTError as exc:
-            logger.warning("requête refusée : %s", exc)
+            logger.warning("request refused: %s", exc)
             response = JSONResponse(
-                {"error": "unauthorized", "detail": "jeton Cloudflare Access invalide"},
+                {"error": "unauthorized", "detail": "invalid Cloudflare Access token"},
                 status_code=401,
             )
             await response(scope, receive, send)
             return
 
-        # L'identité validée est mise à disposition des couches suivantes ;
-        # elle sert aux journaux, jamais à décider d'un droit supplémentaire.
+        # The validated identity is made available to the layers above; it is
+        # used for logging, never to grant an extra right.
         scope.setdefault("state", {})["access_identity"] = claims.get("email") or claims.get("sub")
         await self.app(scope, receive, send)
 

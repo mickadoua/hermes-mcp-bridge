@@ -1,84 +1,84 @@
 # hermes-mcp-bridge
 
-Pont MCP en **Streamable HTTP** entre un agent [Hermes](https://github.com/mickadoua) auto-hébergé et un client MCP distant (Claude sur le web ou mobile, ou tout autre client compatible), derrière **Cloudflare Access**.
+A **Streamable HTTP** MCP bridge between a self-hosted [Hermes](https://github.com/mickadoua) agent and a remote MCP client (Claude on the web or mobile, or any other compatible client), behind **Cloudflare Access**.
 
-Deux contraintes le définissent, et elles tirent dans des directions opposées : ne rien ouvrir sur Internet, et ne donner à aucun process automatisé les droits qu'il faudrait pour faire des dégâts.
+Two constraints define it, and they pull in opposite directions: expose nothing to the Internet, and give no automated process the rights it would need to do real damage.
 
-> Le récit complet de la mise en service, avec les cinq murs pris en chemin :
+> The full account of getting this into production, including the five walls hit along the way (in French):
 > [Brancher un agent self-hosted sur Claude sans lui donner les clés de la maison](https://dm-consulting.tech/fr/blog/brancher-agent-self-hosted-sur-claude).
 
-## Ce qu'il fait
+## What it does
 
-Sept outils, tous en passant par **l'API REST du dashboard** d'Hermes — pas par le socket Docker, pas par ses bases SQLite :
+Seven tools, all going through Hermes' **dashboard REST API** — not the Docker socket, not its SQLite databases:
 
-| Outil | Rôle |
+| Tool | Role |
 |---|---|
-| `kanban_board` | état du kanban, colonne par colonne |
-| `kanban_task` | détail d'une carte : corps, statut, commentaires, résultat |
-| `kanban_create` | dépose une carte **en `triage`, sans assignée** |
-| `kanban_comment` | commente une carte sans la valider |
-| `vault_list` | liste les fichiers produits par l'agent |
-| `vault_read` | lit un de ces fichiers |
-| `ask` | question ponctuelle via la gateway compatible OpenAI |
+| `kanban_board` | kanban state, column by column |
+| `kanban_task` | card detail: body, status, comments, result |
+| `kanban_create` | drops a card **in `triage`, unassigned** |
+| `kanban_comment` | comments on a card without approving it |
+| `vault_list` | lists the files produced by the agent |
+| `vault_read` | reads one of those files |
+| `ask` | one-off question through the OpenAI-compatible gateway |
 
-Ce choix de passer par l'API publique paie trois fois : le pont n'a besoin d'aucun privilège particulier, il ne dépend d'aucun détail interne (donc il survit aux mises à jour d'Hermes), et sa surface est exactement celle d'une API déjà pensée pour être appelée.
+Going through the public API pays off three times over: the bridge needs no special privilege, it depends on no internal detail (so it survives Hermes upgrades), and its surface is exactly that of an API already designed to be called.
 
-## Ce qu'il ne fera jamais
+## What it will never do
 
-**Approuver une carte.**
+**Approve a card.**
 
-L'agent a le droit de préparer un mail de démarchage. Il n'a pas le droit de l'envoyer. Entre les deux il y a une colonne du kanban : la carte s'arrête en attente de validation, et c'est un humain qui la fait passer en « fait ». Ce geste *est* le garde-fou.
+The agent is allowed to draft a cold outreach email. It is not allowed to send it. Between the two sits a kanban column: the card stops there awaiting approval, and a human is the one who moves it to "done". That gesture *is* the safeguard.
 
-Exposer cette transition l'aurait vidée de son sens : un agent capable d'approuver son propre travail n'est plus sous supervision, il a juste une étape de plus à franchir. Il n'y a donc pas de code pour ça dans ce dépôt, et [un test](tests/test_hermes.py) échoue si quelqu'un en ajoute.
+Exposing that transition would have emptied it of meaning: an agent able to approve its own work is no longer supervised, it just has one more step to clear. So there is no code for it in this repository, and [a test](tests/test_hermes.py) fails if anyone adds some.
 
-Même logique à la création : une carte déposée par le pont naît en `triage`, sans assignée, donc gelée. L'agent distant peut **proposer** du travail, pas en **lancer**.
+Same logic at creation time: a card dropped by the bridge is born in `triage`, unassigned, therefore frozen. The remote agent can **propose** work, not **start** it.
 
-## Démarrage rapide
+## Quick start
 
 ```bash
 git clone https://github.com/mickadoua/hermes-mcp-bridge.git
 cd hermes-mcp-bridge
-cp .env.example .env      # puis renseigner HERMES_API_URL, ACCESS_AUD, PUBLIC_HOSTNAMES
+cp .env.example .env      # then fill in HERMES_API_URL, ACCESS_AUD, PUBLIC_HOSTNAMES
 pip install -e ".[dev]"
 python -m hermes_mcp_bridge
 ```
 
-En conteneur, avec le connecteur du tunnel à côté :
+In a container, with the tunnel connector alongside:
 
 ```bash
 docker compose up -d --build
 ```
 
-Aucun port n'est publié sur l'hôte : le tunnel sort, rien n'entre.
+No port is published on the host: the tunnel goes out, nothing comes in.
 
 ## Configuration
 
-Tout passe par l'environnement ; voir [`.env.example`](.env.example) pour la liste commentée. Les quatre valeurs qui comptent :
+Everything comes from the environment; see [`.env.example`](.env.example) for the annotated list. The four values that matter:
 
-| Variable | Pourquoi elle compte |
+| Variable | Why it matters |
 |---|---|
-| `HERMES_API_URL` | l'URL interne du dashboard, telle que le conteneur du pont la joint |
-| `ACCESS_TEAM_DOMAIN` | l'émetteur attendu du JWT (`https://<équipe>.cloudflareaccess.com`) |
-| `ACCESS_AUD` | le tag d'audience **de cette application** — sans lui, un jeton émis pour une autre app du même compte passerait |
-| `PUBLIC_HOSTNAMES` | les noms d'hôte publics servis par le tunnel ; non renseignés, le SDK rejette tout en 421 (voir plus bas) |
+| `HERMES_API_URL` | the dashboard's internal URL, as the bridge container reaches it |
+| `ACCESS_TEAM_DOMAIN` | the expected JWT issuer (`https://<team>.cloudflareaccess.com`) |
+| `ACCESS_AUD` | the audience tag **of this application** — without it, a token issued for another app on the same account would pass |
+| `PUBLIC_HOSTNAMES` | the public hostnames served by the tunnel; left empty, the SDK rejects everything with a 421 (see below) |
 
-Les chemins REST du dashboard sont regroupés en haut de [`hermes_mcp_bridge/hermes.py`](hermes_mcp_bridge/hermes.py). Si votre version d'Hermes les expose ailleurs, c'est le seul endroit à modifier.
+The dashboard's REST paths are grouped at the top of [`hermes_mcp_bridge/hermes.py`](hermes_mcp_bridge/hermes.py). If your version of Hermes exposes them elsewhere, that is the only place to change.
 
-## Sécurité
+## Security
 
-Le pont **valide lui-même** le JWT que Cloudflare Access injecte dans chaque requête : signature via les clés publiques du compte, émetteur, audience, expiration.
+The bridge **validates for itself** the JWT that Cloudflare Access injects into every request: signature against the account's public keys, issuer, audience, expiry.
 
-Ce n'est pas redondant avec le filtrage du bord. Le conteneur écoute sur `0.0.0.0` et partage un réseau Docker avec d'autres services : sans cette couche, n'importe quel conteneur voisin pilote le kanban sans authentification, sans jamais passer par Cloudflare. Le bord protège d'Internet, pas des voisins. C'est aussi la condition posée par Cloudflare pour activer l'« OAuth géré » : ne l'activer que pour un serveur MCP qui valide le JWT d'Access.
+This is not redundant with the filtering at the edge. The container listens on `0.0.0.0` and shares a Docker network with other services: without this layer, any neighbouring container drives the kanban with no authentication at all, never going through Cloudflare. The edge protects you from the Internet, not from the neighbours. It is also the condition Cloudflare sets for enabling "managed OAuth": only enable it for an MCP server that validates the Access JWT.
 
-`ACCESS_VERIFY_JWT=false` existe pour le développement local, et le pont le journalise bruyamment à chaque démarrage.
+`ACCESS_VERIFY_JWT=false` exists for local development, and the bridge logs it loudly at every startup.
 
-La mise en place côté Cloudflare — tunnel, les **deux** politiques (machines et humains, qui ne se mélangent pas), OAuth géré, URI de redirection — est décrite dans [`docs/cloudflare-access.md`](docs/cloudflare-access.md).
+The Cloudflare-side setup — tunnel, the **two** policies (machines and humans, which do not mix), managed OAuth, redirect URI — is described in [`docs/cloudflare-access.md`](docs/cloudflare-access.md).
 
-## Le 421 qui surprend tout le monde
+## The 421 that catches everyone out
 
-Le SDK MCP Python embarque une protection anti-DNS-rebinding. `streamable_http_app()` prend un paramètre `host` qui vaut `127.0.0.1` par défaut, et **si on ne configure pas explicitement la politique, le SDK en dérive une restreinte à la loopback** : tout nom d'hôte public est rejeté en `421 Invalid Host header`, avec pour seule trace une ligne de log côté serveur — le client, lui, ne voit qu'une erreur de transport générique.
+The Python MCP SDK ships DNS-rebinding protection. `streamable_http_app()` takes a `host` parameter that defaults to `127.0.0.1`, and **if the policy is not configured explicitly, the SDK derives one restricted to the loopback**: every public hostname is rejected with `421 Invalid Host header`, leaving nothing behind but a single server-side log line — the client only sees a generic transport error.
 
-C'est à ça que sert `PUBLIC_HOSTNAMES` : chaque nom est décliné en variante « avec port », puis passé au SDK. Deux tests figent le comportement dans les deux sens ([`tests/test_server.py`](tests/test_server.py)).
+That is what `PUBLIC_HOSTNAMES` is for: each name is expanded into a "with port" variant, then handed to the SDK. Two tests pin the behaviour in both directions ([`tests/test_server.py`](tests/test_server.py)).
 
 ## Tests
 
@@ -86,7 +86,7 @@ C'est à ça que sert `PUBLIC_HOSTNAMES` : chaque nom est décliné en variante 
 pytest
 ```
 
-La suite vérifie surtout ce qu'on oublie de vérifier : qu'un **jeton légitime passe**. Un validateur qui refuse tout ressemble trait pour trait à un validateur correct ; « sans jeton → 401 » et « jeton forgé → 401 » ne prouvent rien tout seuls.
+The suite checks above all the thing people forget to check: that a **legitimate token gets through**. A validator that rejects everything looks exactly like a correct one; "no token → 401" and "forged token → 401" prove nothing on their own.
 
 ## Licence
 

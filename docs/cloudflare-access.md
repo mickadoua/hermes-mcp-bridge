@@ -1,72 +1,72 @@
-# Mettre le pont derrière Cloudflare Access
+# Putting the bridge behind Cloudflare Access
 
-Objectif : que le pont soit joignable depuis Claude sur n'importe quel appareil, sans qu'aucun port ne soit ouvert sur la box, et sans qu'aucune IP publique ne soit à protéger.
+Goal: make the bridge reachable from Claude on any device, without opening a single port on the router, and without any public IP to protect.
 
-Les noms d'hôtes, identifiants d'application et adresses de ce document sont des placeholders.
+The hostnames, application identifiers and addresses in this document are placeholders.
 
-## 1. Le tunnel
+## 1. The tunnel
 
-Créer un tunnel dans Zero Trust, puis publier le pont dessus. Le connecteur `cloudflared` tourne à côté du pont (voir [`compose.yaml`](../compose.yaml)) et **sort** vers Cloudflare : rien n'entre.
+Create a tunnel in Zero Trust, then publish the bridge on it. The `cloudflared` connector runs alongside the bridge (see [`compose.yaml`](../compose.yaml)) and dials **out** to Cloudflare: nothing comes in.
 
-Route publique du tunnel :
+Public route of the tunnel:
 
 ```
 agent.example.com  →  http://hermes-mcp-bridge:8080
 ```
 
-Renseigner le même nom dans `PUBLIC_HOSTNAMES`, sinon le SDK MCP répond 421 (voir [dépannage](depannage.md)).
+Put the same name in `PUBLIC_HOSTNAMES`, otherwise the MCP SDK answers 421 (see [troubleshooting](troubleshooting.md)).
 
-## 2. L'application Access
+## 2. The Access application
 
-Créer une application **self-hosted** sur `agent.example.com`.
+Create a **self-hosted** application on `agent.example.com`.
 
-Puis, et c'est le point qui coûte du temps : **deux populations, deux politiques distinctes**.
+Then, and this is the part that costs time: **two populations, two distinct policies**.
 
-### Politique « machines » — action *Autorisation de service*
+### The "machines" policy — action *Service Auth*
 
-Pour les scripts, avec un jeton de service (une paire d'en-têtes `CF-Access-Client-Id` / `CF-Access-Client-Secret`).
+For scripts, using a service token (a `CF-Access-Client-Id` / `CF-Access-Client-Secret` header pair).
 
-> Une politique dont l'action est « Autorisation de service » n'évalue **que** du non-identitaire : jetons, mTLS, IP. Y ajouter une règle sur une adresse e-mail ne produit aucune erreur — la règle est simplement ignorée.
+> A policy whose action is "Service Auth" evaluates **only** non-identity rules: tokens, mTLS, IP. Adding an email-address rule to it raises no error — the rule is simply ignored.
 
-### Politique « humains » — action *Autoriser*
+### The "humans" policy — action *Allow*
 
-Pour vous, via votre fournisseur d'identité (e-mail, Google, GitHub…).
+For you, through your identity provider (email, Google, GitHub…).
 
-> La réciproque est vraie : une politique « Autoriser » avec un sélecteur de jeton ne valide pas le jeton, elle redirige vers une page de login.
+> The converse holds too: an "Allow" policy with a service-token selector does not validate the token, it redirects to a login page.
 
-Access évalue les politiques de service d'abord, les autres ensuite.
+Access evaluates service policies first, the others afterwards.
 
-## 3. L'audience
+## 3. The audience
 
-Relever le **tag d'audience (AUD)** de l'application et le mettre dans `ACCESS_AUD`. C'est ce qui distingue *cette* application des autres applications du même compte : sans ce contrôle, un jeton émis pour une autre app passerait la validation du pont.
+Pick up the application's **Audience (AUD) tag** and put it in `ACCESS_AUD`. It is what distinguishes *this* application from the other applications on the same account: without that check, a token issued for another app would pass the bridge's validation.
 
-Renseigner aussi `ACCESS_TEAM_DOMAIN` avec `https://<votre-équipe>.cloudflareaccess.com`.
+Also fill in `ACCESS_TEAM_DOMAIN` with `https://<your-team>.cloudflareaccess.com`.
 
-## 4. L'OAuth géré
+## 4. Managed OAuth
 
-L'interface des connecteurs Claude ne propose que de l'OAuth : pas de bearer, pas d'en-tête personnalisé. Or un jeton de service Cloudflare **est** une paire d'en-têtes — toute la configuration « machine » est donc structurellement inutilisable par un connecteur web.
+Claude's connector UI only offers OAuth: no bearer token, no custom header. But a Cloudflare service token **is** a header pair — so the whole "machine" setup is structurally unusable from a web connector.
 
-Activer donc l'**OAuth géré** sur l'application, qui fait d'Access le fournisseur OAuth. Sa documentation pose une condition : ne l'activer que pour un serveur MCP qui valide le JWT d'Access. C'est ce que fait ce pont — gardez `ACCESS_VERIFY_JWT=true`.
+So enable **managed OAuth** on the application, which makes Access the OAuth provider. Its documentation sets one condition: only enable it for an MCP server that validates the Access JWT. That is exactly what this bridge does — keep `ACCESS_VERIFY_JWT=true`.
 
-Déclarer l'URI de redirection, sans quoi l'enregistrement dynamique du client échoue (« Impossible de s'inscrire auprès du service de connexion ») :
+Declare the redirect URI, without which dynamic client registration fails ("Could not register with the login service"):
 
 ```
 https://claude.ai/api/mcp/auth_callback
 ```
 
-## 5. Brancher le connecteur
+## 5. Wiring up the connector
 
-Dans Claude, ajouter un connecteur MCP distant pointant sur :
+In Claude, add a remote MCP connector pointing at:
 
 ```
 https://agent.example.com/mcp
 ```
 
-La première connexion ouvre la page de login Access ; ensuite les sept outils apparaissent.
+The first connection opens the Access login page; the seven tools show up afterwards.
 
-## Vérifier, dans le bon ordre
+## Verifying, in the right order
 
-Isoler une variable à la fois. Avant de brancher le connecteur, tester la chaîne avec un simple **jeton de service** : Cloudflare émet alors un vrai JWT **sans impliquer OAuth**.
+Isolate one variable at a time. Before wiring up the connector, test the chain with a plain **service token**: Cloudflare then issues a real JWT **without involving OAuth**.
 
 ```bash
 curl -sS https://agent.example.com/healthz \
@@ -74,10 +74,10 @@ curl -sS https://agent.example.com/healthz \
   -H "CF-Access-Client-Secret: $CF_SECRET"
 ```
 
-Puis, depuis le NAS et **sans le moindre en-tête**, vérifier que l'origine refuse bien :
+Then, from the NAS and **with no header whatsoever**, check that the origin does refuse:
 
 ```bash
-curl -sS -o /dev/null -w '%{http_code}\n' http://hermes-mcp-bridge:8080/mcp   # attendu : 401
+curl -sS -o /dev/null -w '%{http_code}\n' http://hermes-mcp-bridge:8080/mcp   # expected: 401
 ```
 
-Si celui-ci répond autre chose qu'un 401, le pont ne valide rien et n'importe quel conteneur voisin peut piloter le kanban.
+If this one answers anything other than a 401, the bridge is validating nothing and any neighbouring container can drive the kanban.
