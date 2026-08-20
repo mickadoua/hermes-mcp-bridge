@@ -1,7 +1,7 @@
 [project]
 name = "hermes-mcp-bridge"
 version = "0.1.0"
-description = "Pont MCP HTTP entre un agent Hermes auto-hébergé et un client MCP distant, derrière Cloudflare Access"
+description = "HTTP MCP bridge between a self-hosted Hermes agent and a remote MCP client, behind Cloudflare Access"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }

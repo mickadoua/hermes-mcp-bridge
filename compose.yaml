@@ -1,5 +1,5 @@
-# Exemple de déploiement : le pont et le connecteur cloudflared, côte à côte.
-# Aucun port n'est publié sur l'hôte : le tunnel sort, rien n'entre.
+# Example deployment: the bridge and the cloudflared connector, side by side.
+# No port is published on the host: the tunnel goes out, nothing comes in.
 services:
   hermes-mcp-bridge:
     build: .
@@ -11,7 +11,7 @@ services:
     image: cloudflare/cloudflared:latest
     command: tunnel --no-autoupdate run
     environment:
-      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?jeton du tunnel Cloudflare}
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?Cloudflare tunnel token}
     restart: unless-stopped
     depends_on: [hermes-mcp-bridge]
     networks: [hermes]

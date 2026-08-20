@@ -1,4 +1,4 @@
-"""Point d'entrée : `python -m hermes_mcp_bridge`."""
+"""Entry point: `python -m hermes_mcp_bridge`."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ def main() -> int:
     try:
         config = load_config()
     except ConfigError as exc:
-        print(f"configuration invalide : {exc}", file=sys.stderr)
+        print(f"invalid configuration: {exc}", file=sys.stderr)
         return 2
 
     uvicorn.run(build_app(config), host=config.host, port=config.port, log_level="info")

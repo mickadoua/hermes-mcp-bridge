@@ -1,9 +1,9 @@
-"""Configuration du pont, lue une fois au démarrage.
+"""Bridge configuration, read once at startup.
 
-Aucun secret n'est stocké dans le dépôt : tout arrive par l'environnement.
-Le pont refuse de démarrer si une valeur indispensable manque, plutôt que de
-tourner à moitié configuré — un serveur qui écoute sans valider est pire qu'un
-serveur qui ne démarre pas.
+No secret is stored in the repository: everything arrives through the
+environment. The bridge refuses to start when a required value is missing,
+rather than running half-configured — a server that listens without validating
+is worse than a server that does not start.
 """
 
 from __future__ import annotations
@@ -13,13 +13,13 @@ from dataclasses import dataclass, field
 
 
 class ConfigError(RuntimeError):
-    """Configuration absente ou incohérente."""
+    """Configuration missing or inconsistent."""
 
 
 def _env(name: str, default: str | None = None, *, required: bool = False) -> str:
     value = os.environ.get(name, default if default is not None else "")
     if required and not value:
-        raise ConfigError(f"variable d'environnement manquante : {name}")
+        raise ConfigError(f"missing environment variable: {name}")
     return value
 
 
@@ -43,7 +43,7 @@ class Config:
     access_aud: str
     verify_access_jwt: bool
 
-    # --- Transport HTTP --------------------------------------------------
+    # --- HTTP transport --------------------------------------------------
     host: str
     port: int
     public_hostnames: list[str] = field(default_factory=list)
@@ -59,10 +59,10 @@ class Config:
 
     @property
     def allowed_hosts(self) -> list[str]:
-        """Noms d'hôte acceptés par la protection anti-DNS-rebinding du SDK.
+        """Hostnames accepted by the SDK's DNS-rebinding protection.
 
-        Chaque nom est décliné en variante « avec port », sans quoi un
-        `Host: agent.example.com:443` est rejeté en 421.
+        Each name is expanded into a "with port" variant, without which a
+        `Host: agent.example.com:443` is rejected with a 421.
         """
         hosts: list[str] = []
         for name in self.public_hostnames:

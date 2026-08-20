@@ -1,9 +1,8 @@
-"""Serveur MCP (Streamable HTTP) exposant sept outils Hermes.
+"""MCP server (Streamable HTTP) exposing seven Hermes tools.
 
-Sept outils, et un huitième délibérément absent : approuver une carte. Un
-agent capable de valider son propre travail n'est plus sous supervision, il a
-juste une étape de plus à franchir. Ce serveur ne fera donc jamais passer une
-tâche de `blocked` à `done`.
+Seven tools, and an eighth deliberately absent: approving a card. An agent able
+to sign off its own work is no longer supervised, it just has one more step to
+clear. So this server will never move a task from `blocked` to `done`.
 """
 
 from __future__ import annotations
@@ -24,13 +23,13 @@ from .hermes import HermesClient
 
 logger = logging.getLogger(__name__)
 
-INSTRUCTIONS = """Pont MCP vers un agent Hermes.
+INSTRUCTIONS = """MCP bridge to a Hermes agent.
 
-Expose le kanban et les rapports d'une instance Hermes à un client MCP distant,
-en passant par l'API REST de son dashboard.
+Exposes the kanban and reports of a Hermes instance to a remote MCP client,
+going through its dashboard REST API.
 
-Ce que ce serveur ne fera jamais : approuver une carte. Faire passer une tâche
-de `blocked` à `done` est le geste par lequel un humain valide une sortie.
+What this server will never do: approve a card. Moving a task from `blocked` to
+`done` is the gesture by which a human approves an output.
 """
 
 
@@ -45,49 +44,49 @@ def build_mcp_server(hermes: HermesClient) -> MCPServer:
 
     @mcp.tool()
     async def kanban_board(board: str = "") -> str:
-        """État du kanban : chaque colonne avec ses cartes.
+        """Kanban state: every column with its cards.
 
-        Rappel de lecture : `todo` ne veut pas dire « à faire » mais « bloqué
-        par une dépendance ». Les seules colonnes qui appellent un geste humain
-        sont `triage` (à lancer) et `blocked` (à valider).
+        A reading note: `todo` does not mean "to do" but "blocked by a
+        dependency". The only columns that call for a human gesture are
+        `triage` (to start) and `blocked` (to approve).
         """
         return _dump(await hermes.board(board))
 
     @mcp.tool()
     async def kanban_task(task_id: str) -> str:
-        """Détail d'une carte : corps, statut, commentaires, résultat."""
+        """Card detail: body, status, comments, result."""
         return _dump(await hermes.task(task_id))
 
     @mcp.tool()
     async def kanban_create(title: str, body: str = "", board: str = "") -> str:
-        """Dépose une nouvelle carte en `triage`, sans assignée — donc gelée.
+        """Drop a new card in `triage`, unassigned — therefore frozen.
 
-        L'agent distant peut proposer du travail, pas en lancer : assigner la
-        carte est précisément le geste par lequel un humain décide de démarrer.
+        The remote agent can propose work, not start it: assigning the card is
+        precisely the gesture by which a human decides to get going.
         """
         return _dump(await hermes.create_task(title=title, body=body, board=board))
 
     @mcp.tool()
     async def kanban_comment(task_id: str, text: str) -> str:
-        """Ajoute un commentaire à une carte, sans la valider."""
+        """Add a comment to a card, without approving it."""
         return _dump(await hermes.comment(task_id, text))
 
     @mcp.tool()
     async def vault_list(subdir: str = "") -> str:
-        """Liste les fichiers produits par l'agent dans sa zone d'écriture."""
+        """List the files produced by the agent in its writing area."""
         return _dump(await hermes.vault_list(subdir))
 
     @mcp.tool()
     async def vault_read(path: str) -> str:
-        """Lit un fichier de la zone d'écriture de l'agent (rapports, notes)."""
+        """Read a file from the agent's writing area (reports, notes)."""
         return _dump(await hermes.vault_read(path))
 
     @mcp.tool()
     async def ask(question: str, model: str = "") -> str:
-        """Pose une question à l'agent via sa gateway compatible OpenAI.
+        """Ask the agent a question through its OpenAI-compatible gateway.
 
-        Réponse ponctuelle, sans outils ni mémoire de session : pour faire
-        exécuter un vrai travail, déposer une carte avec `kanban_create`.
+        A one-off answer, with no tools and no session memory: to get real work
+        done, drop a card with `kanban_create`.
         """
         return await hermes.ask(question, model)
 
@@ -95,7 +94,7 @@ def build_mcp_server(hermes: HermesClient) -> MCPServer:
 
 
 def build_app(config: Config | None = None) -> Starlette:
-    """Assemble l'application ASGI complète : santé, MCP, validation du jeton."""
+    """Assemble the complete ASGI application: health, MCP, token validation."""
     config = config or load_config()
     hermes = HermesClient(
         api_url=config.hermes_api_url,
@@ -108,18 +107,19 @@ def build_app(config: Config | None = None) -> Starlette:
     )
     mcp = build_mcp_server(hermes)
 
-    # Piège n°5 de la mise en service : sans `transport_security`, le SDK
-    # dérive sa politique anti-DNS-rebinding du paramètre `host`, qui vaut
-    # `127.0.0.1` par défaut. Tout nom d'hôte public est alors rejeté en 421,
-    # avec pour seule trace une ligne de log côté serveur.
+    # Pitfall no. 5 of getting this into production: without
+    # `transport_security`, the SDK derives its DNS-rebinding policy from the
+    # `host` parameter, which defaults to `127.0.0.1`. Every public hostname is
+    # then rejected with a 421, leaving nothing behind but a server-side log
+    # line.
     if config.public_hostnames:
         security = TransportSecuritySettings(
             allowed_hosts=config.allowed_hosts,
             allowed_origins=config.allowed_origins,
         )
     else:
-        # Aucun nom public déclaré : on reste en loopback, ce qui est le bon
-        # défaut pour un poste de développement.
+        # No public name declared: stay on the loopback, which is the right
+        # default for a development machine.
         security = TransportSecuritySettings(
             allowed_hosts=["127.0.0.1", "127.0.0.1:*", "localhost", "localhost:*"],
             allowed_origins=config.allowed_origins,
@@ -145,7 +145,7 @@ def build_app(config: Config | None = None) -> Starlette:
         return AccessJWTMiddleware(app, verifier)  # type: ignore[return-value]
 
     logger.warning(
-        "ACCESS_VERIFY_JWT=false : le pont accepte toute requête qui l'atteint. "
-        "À n'utiliser qu'en développement local."
+        "ACCESS_VERIFY_JWT=false: the bridge accepts every request that reaches it. "
+        "Only use this for local development."
     )
     return app

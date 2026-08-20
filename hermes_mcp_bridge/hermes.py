@@ -1,11 +1,11 @@
-"""Client de l'API REST du dashboard Hermes.
+"""Client for the Hermes dashboard REST API.
 
-Tout passe par l'API publique du dashboard : ni socket Docker, ni accès direct
-aux bases SQLite. Le pont n'a donc besoin d'aucun privilège particulier, et il
-ne dépend d'aucun détail interne — il survit aux mises à jour d'Hermes.
+Everything goes through the dashboard's public API: no Docker socket, no direct
+access to the SQLite databases. The bridge therefore needs no special privilege,
+and depends on no internal detail — it survives Hermes upgrades.
 
-Les chemins REST sont regroupés ici, en haut du module : si votre version du
-dashboard les expose ailleurs, c'est le seul endroit à modifier.
+The REST paths are grouped here, at the top of the module: if your version of
+the dashboard exposes them elsewhere, that is the only place to change.
 """
 
 from __future__ import annotations
@@ -14,27 +14,27 @@ from typing import Any
 
 import httpx
 
-# --- Chemins de l'API du dashboard --------------------------------------
+# --- Dashboard API paths -------------------------------------------------
 KANBAN_BOARD = "/api/kanban/board"
 KANBAN_TASKS = "/api/kanban/tasks"
 VAULT_LIST = "/api/vault/list"
 VAULT_READ = "/api/vault/read"
 GATEWAY_CHAT = "/v1/chat/completions"
 
-#: Colonne dans laquelle naît toute carte déposée par le pont.
+#: Column every card dropped by the bridge is born into.
 TRIAGE = "triage"
 
 
 class HermesError(RuntimeError):
-    """Le dashboard a répondu autre chose qu'un succès."""
+    """The dashboard answered with something other than a success."""
 
 
 class HermesClient:
-    """Enveloppe fine sur l'API du dashboard.
+    """Thin wrapper over the dashboard API.
 
-    Une seule règle structurante : ce client n'expose aucun moyen de changer
-    le statut d'une carte. Faire passer une tâche de `blocked` à `done` est le
-    geste par lequel un humain valide une sortie ; il n'a pas de code ici.
+    One structural rule: this client exposes no way of changing a card's
+    status. Moving a task from `blocked` to `done` is the gesture by which a
+    human approves an output; there is no code for it here.
     """
 
     def __init__(
@@ -62,30 +62,29 @@ class HermesClient:
     # --- Kanban ---------------------------------------------------------
 
     async def board(self, board: str = "") -> Any:
-        """État du kanban : chaque colonne avec ses cartes."""
+        """Kanban state: every column with its cards."""
         return await self._get(
             f"{self._api_url}{KANBAN_BOARD}",
             params={"board": board or self._default_board},
         )
 
     async def task(self, task_id: str) -> Any:
-        """Détail d'une carte : corps, statut, commentaires, résultat."""
+        """Card detail: body, status, comments, result."""
         return await self._get(f"{self._api_url}{KANBAN_TASKS}/{task_id}")
 
     async def create_task(self, title: str, body: str = "", board: str = "") -> Any:
-        """Dépose une carte en `triage`, sans assignée — donc gelée.
+        """Drop a card in `triage`, unassigned — therefore frozen.
 
-        Trois détails se combinent, et les ignorer fait démarrer un travail que
-        personne n'a validé :
+        Three details combine here, and ignoring them starts work nobody
+        approved:
 
-        - sans `status`, la carte naîtrait en `ready` et le dispatcher la
-          ramasserait dans la minute ;
-        - une carte en `triage` **avec** une assignée est reprise par le
-          *specifier*, qui la réécrit et la promeut : le gel ne tient que sans
-          assignée ;
-        - `board` est un paramètre de requête, jamais un champ du corps. Dans
-          le corps il est ignoré en silence et la carte part dans le board par
-          défaut.
+        - without `status`, the card would be born in `ready` and the
+          dispatcher would pick it up within the minute;
+        - a card in `triage` **with** an assignee is taken over by the
+          *specifier*, which rewrites and promotes it: the freeze only holds
+          while it is unassigned;
+        - `board` is a query parameter, never a body field. In the body it is
+          silently ignored and the card lands on the default board.
         """
         return await self._post(
             f"{self._api_url}{KANBAN_TASKS}",
@@ -94,17 +93,17 @@ class HermesClient:
         )
 
     async def comment(self, task_id: str, text: str) -> Any:
-        """Commente une carte, sans toucher à son statut.
+        """Comment on a card, without touching its status.
 
-        C'est la façon de répondre à une carte `blocked` sans la valider :
-        l'agent lira le commentaire à la reprise.
+        This is how you answer a `blocked` card without approving it: the agent
+        will read the comment when it resumes.
         """
         return await self._post(
             f"{self._api_url}{KANBAN_TASKS}/{task_id}/comments",
             json={"text": text},
         )
 
-    # --- Zone d'écriture de l'agent --------------------------------------
+    # --- The agent's writing area ----------------------------------------
 
     async def vault_list(self, subdir: str = "") -> Any:
         return await self._get(f"{self._api_url}{VAULT_LIST}", params={"subdir": subdir})
@@ -112,15 +111,15 @@ class HermesClient:
     async def vault_read(self, path: str) -> Any:
         return await self._get(f"{self._api_url}{VAULT_READ}", params={"path": path})
 
-    # --- Gateway compatible OpenAI ---------------------------------------
+    # --- OpenAI-compatible gateway ---------------------------------------
 
     async def ask(self, question: str, model: str = "") -> str:
-        """Question ponctuelle à l'agent : sans outils, sans mémoire de session.
+        """One-off question to the agent: no tools, no session memory.
 
-        Pour faire exécuter un vrai travail, on dépose une carte.
+        To get real work done, drop a card.
         """
         if not self._gateway_url:
-            raise HermesError("HERMES_GATEWAY_URL n'est pas configurée")
+            raise HermesError("HERMES_GATEWAY_URL is not configured")
         payload = {
             "model": model or self._default_model or "default",
             "messages": [{"role": "user", "content": question}],
@@ -132,9 +131,9 @@ class HermesClient:
         try:
             return data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
-            raise HermesError(f"réponse inattendue de la gateway : {data!r}") from exc
+            raise HermesError(f"unexpected response from the gateway: {data!r}") from exc
 
-    # --- Plomberie --------------------------------------------------------
+    # --- Plumbing ---------------------------------------------------------
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._api_token}"} if self._api_token else {}
@@ -148,7 +147,7 @@ class HermesClient:
     async def _request(self, method: str, url: str, **kwargs: Any) -> Any:
         response = await self._client.request(method, url, **kwargs)
         if response.status_code >= 400:
-            raise HermesError(f"{method} {url} → {response.status_code} : {response.text[:500]}")
+            raise HermesError(f"{method} {url} → {response.status_code}: {response.text[:500]}")
         if not response.content:
             return {}
         try:

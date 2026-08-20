@@ -5,10 +5,10 @@ COPY pyproject.toml README.md ./
 COPY hermes_mcp_bridge ./hermes_mcp_bridge
 RUN pip install --no-cache-dir .
 
-# Le conteneur n'a besoin d'aucun privilège : ni socket Docker, ni volume de
-# l'agent. Il ne parle au dashboard que par HTTP.
-RUN useradd --create-home --uid 10001 pont
-USER pont
+# The container needs no privilege at all: no Docker socket, no agent volume.
+# It only talks to the dashboard over HTTP.
+RUN useradd --create-home --uid 10001 bridge
+USER bridge
 
 EXPOSE 8080
 CMD ["python", "-m", "hermes_mcp_bridge"]
